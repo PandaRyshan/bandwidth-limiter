@@ -1,0 +1,16 @@
+[Unit]
+Description=Smart Bandwidth Limit Daemon (tc)
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+ExecStart=/usr/local/bin/tc_limit --on
+ExecStop=/usr/local/bin/tc_limit --off
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
