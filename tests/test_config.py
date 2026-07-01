@@ -151,9 +151,12 @@ class TestLoadConfig:
         with pytest.raises(ValueError, match="threshold.*must be >"):
             load_config(config_path=str(yaml_path))
 
-    def test_explicit_path_missing_raises(self, tmp_path):
-        with pytest.raises(FileNotFoundError):
-            load_config(config_path=str(tmp_path / "missing.yaml"))
+    def test_explicit_path_missing_falls_back(self, tmp_path):
+        """Missing explicit path should fall back to defaults, not crash."""
+        cfg = load_config(config_path=str(tmp_path / "missing.yaml"))
+        # Should use built-in defaults
+        assert cfg.limits.higher == 150
+        assert cfg.limits.threshold == 120
 
 
 # ── reload_config ──────────────────────────────────────────────────────────

@@ -235,6 +235,10 @@ def load_config(
 
     Priority: CLI overrides > config file > built-in defaults.
 
+    When *config_path* points to a non-existent file a warning is logged
+    and built-in defaults are used instead — the daemon never fails to
+    start because of a missing config file.
+
     Args:
         config_path: Optional path to YAML file.
         cli_overrides: Flat dict of CLI arguments (e.g. {"higher_limit": 200}).
@@ -243,8 +247,7 @@ def load_config(
         Validated Config.
 
     Raises:
-        ValueError: Configuration validation failed.
-        FileNotFoundError: Explicit config_path does not exist.
+        ValueError: Configuration validation failed or YAML syntax error.
     """
     raw: Dict[str, Any] = dict(DEFAULTS)
 
@@ -257,8 +260,7 @@ def load_config(
             raw = _deep_merge(raw, file_raw)
         except FileNotFoundError:
             if config_path is not None:
-                raise
-            # Default path missing → use defaults only, no error.
+                logger.warning("Config file %r not found, using built-in defaults", path)
             path = "<defaults>"
         except yaml.YAMLError as exc:
             raise ValueError(f"Invalid YAML in {path}: {exc}") from exc
