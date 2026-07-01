@@ -88,7 +88,7 @@ cli ──→ daemon
 
 ## 3. Configuration
 
-### Schema (`/etc/tc_limit/config.yaml`)
+### Schema (`/etc/tc-limit/config.yaml`)
 
 ```yaml
 # ── Bandwidth Limits ──
@@ -113,13 +113,13 @@ network:
 runtime:
   dry_run:   false
   log_level: "INFO"    # DEBUG | INFO | WARN | ERROR
-  state_file: "/run/tc_limit/state.json"
-  pid_file:   "/run/tc_limit/daemon.pid"
+  state_file: "/run/tc-limit/state.json"
+  pid_file:   "/run/tc-limit/daemon.pid"
 
 # ── Phase 2: Storage (reserved) ──
 # storage:
 #   enabled: true
-#   path: "/var/lib/tc_limit/metrics.db"
+#   path: "/var/lib/tc-limit/metrics.db"
 #   commit_interval: 60
 #   retention_days: 90
 ```
@@ -127,7 +127,7 @@ runtime:
 ### Config Priority
 
 ```
-CLI args  >  --config file  >  /etc/tc_limit/config.yaml  >  built-in defaults
+CLI args  >  --config file  >  /etc/tc-limit/config.yaml  >  built-in defaults
 ```
 
 ### Hot-Reload
@@ -202,8 +202,8 @@ every commit_interval: storage.insert() (Phase 2)
 
 | File | Path | Purpose |
 |------|------|---------|
-| PID file | `/run/tc_limit/daemon.pid` | Process lock + daemon discovery |
-| State file | `/run/tc_limit/state.json` | Persist state across restarts |
+| PID file | `/run/tc-limit/daemon.pid` | Process lock + daemon discovery |
+| State file | `/run/tc-limit/state.json` | Persist state across restarts |
 | Lock | Via PID file `flock` / `fcntl` | Single-instance enforcement |
 
 ### State Persistence Format (`state.json`)
@@ -251,14 +251,14 @@ be added as deprecated aliases if desired.
 ├── src/            # Python package (read-only)
 ├── venv/           # virtualenv with dependencies
 │
-/etc/tc_limit/
+/etc/tc-limit/
 └── config.yaml     # user-editable configuration
 │
-/run/tc_limit/      # runtime files (tmpfs)
+/run/tc-limit/      # runtime files (tmpfs)
 ├── daemon.pid
 └── state.json
 │
-/var/lib/tc_limit/  # Phase 2
+/var/lib/tc-limit/  # Phase 2
 └── metrics.db      # SQLite database
 │
 /usr/local/bin/
@@ -274,7 +274,7 @@ be added as deprecated aliases if desired.
 1. Copy source to `/opt/tc-limit/src/`
 2. `python3 -m venv /opt/tc-limit/venv`
 3. `pip install /opt/tc-limit/src/`
-4. Create `/etc/tc_limit/`, copy `config.example.yaml` → `config.yaml` if absent
+4. Create `/etc/tc-limit/`, copy `config.example.yaml` → `config.yaml` if absent
 5. Write systemd unit to `/etc/systemd/system/tc-limit.service`
 6. `ln -sf /opt/tc-limit/venv/bin/tc-limit /usr/local/bin/tc-limit`
 7. `systemctl daemon-reload && systemctl enable tc-limit`
@@ -285,7 +285,7 @@ be added as deprecated aliases if desired.
 2. Remove systemd unit
 3. Remove symlink
 4. `rm -rf /opt/tc-limit/`
-5. Prompt before removing `/etc/tc_limit/` and `/run/tc_limit/`
+5. Prompt before removing `/etc/tc-limit/` and `/run/tc-limit/`
 
 ### systemd Unit
 
@@ -297,15 +297,15 @@ Wants=network-online.target
 
 [Service]
 Type=notify
-ExecStart=/usr/local/bin/tc-limit daemon --config /etc/tc_limit/config.yaml
+ExecStart=/usr/local/bin/tc-limit daemon --config /etc/tc-limit/config.yaml
 ExecReload=/bin/kill -HUP $MAINPID
-ExecStop=/usr/local/bin/tc-limit stop --config /etc/tc_limit/config.yaml
+ExecStop=/usr/local/bin/tc-limit stop --config /etc/tc-limit/config.yaml
 Restart=always
 RestartSec=5
 
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/run/tc_limit /etc/tc_limit
+ReadWritePaths=/run/tc-limit /etc/tc-limit
 NoNewPrivileges=true
 
 StandardOutput=journal

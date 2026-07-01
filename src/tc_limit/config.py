@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 # ── Constants ────────────────────────────────────────────────────────────
 
-DEFAULT_CONFIG_PATH = "/etc/tc_limit/config.yaml"
+DEFAULT_CONFIG_PATH = "/etc/tc-limit/config.yaml"
 MBIT_TO_BPS = 125_000  # 1 Mbps = 125,000 B/s
 
 # Built-in defaults (lowest priority)
@@ -29,8 +29,8 @@ DEFAULTS: Dict[str, Any] = {
     "runtime": {
         "dry_run": False,
         "log_level": "INFO",
-        "state_file": "/run/tc_limit/state.json",
-        "pid_file": "/run/tc_limit/daemon.pid",
+        "state_file": "/run/tc-limit/state.json",
+        "pid_file": "/run/tc-limit/daemon.pid",
     },
 }
 
@@ -76,8 +76,8 @@ class NetworkConfig:
 class RuntimeConfig:
     dry_run: bool = False
     log_level: LogLevel = LogLevel.INFO
-    state_file: str = "/run/tc_limit/state.json"
-    pid_file: str = "/run/tc_limit/daemon.pid"
+    state_file: str = "/run/tc-limit/state.json"
+    pid_file: str = "/run/tc-limit/daemon.pid"
 
 
 @dataclass
@@ -202,8 +202,8 @@ def _validate_and_derive(raw: Dict[str, Any], source: Optional[str]) -> Config:
     runtime_raw = raw.get("runtime", {})
     dry_run = bool(runtime_raw.get("dry_run", False))
     log_level = LogLevel.from_string(str(runtime_raw.get("log_level", "INFO")))
-    state_file = str(runtime_raw.get("state_file", "/run/tc_limit/state.json"))
-    pid_file = str(runtime_raw.get("pid_file", "/run/tc_limit/daemon.pid"))
+    state_file = str(runtime_raw.get("state_file", "/run/tc-limit/state.json"))
+    pid_file = str(runtime_raw.get("pid_file", "/run/tc-limit/daemon.pid"))
 
     # Build
     cfg = Config(

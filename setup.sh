@@ -42,15 +42,15 @@ Wants=network-online.target
 
 [Service]
 Type=notify
-ExecStart=/usr/local/bin/tc-limit daemon --config /etc/tc_limit/config.yaml
+ExecStart=/usr/local/bin/tc-limit daemon --config /etc/tc-limit/config.yaml
 ExecReload=/bin/kill -HUP $MAINPID
-ExecStop=/usr/local/bin/tc-limit stop --config /etc/tc_limit/config.yaml
+ExecStop=/usr/local/bin/tc-limit stop --config /etc/tc-limit/config.yaml
 Restart=always
 RestartSec=5
 
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/run/tc_limit /etc/tc_limit
+ReadWritePaths=/run/tc-limit /etc/tc-limit
 NoNewPrivileges=true
 
 StandardOutput=journal
