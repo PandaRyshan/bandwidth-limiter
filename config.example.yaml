@@ -1,0 +1,34 @@
+# tc_limit — Smart Bandwidth Limit Daemon
+# Copy to /etc/tc_limit/config.yaml and edit to suit your environment.
+
+# ── Bandwidth Limits ──
+limits:
+  higher:    150       # Mbps — normal operating rate
+  lower:     110       # Mbps — limited rate
+  threshold: 120       # Mbps — alert line
+
+# ── Sampling Window ──
+window:
+  duration:  5         # minutes — sliding window size
+  interval:  10        # seconds — sampling interval
+
+cooldown:    3         # minutes — cooldown after entering LIMITED
+
+# ── Network ──
+network:
+  interface: ""        # empty = auto-detect default route interface
+  burst_kbit: 16       # kbit — tc HTB token bucket burst
+
+# ── Runtime ──
+runtime:
+  dry_run:   false
+  log_level: "INFO"    # DEBUG | INFO | WARN | ERROR
+  state_file: "/run/tc_limit/state.json"
+  pid_file:   "/run/tc_limit/daemon.pid"
+
+# ── Phase 2: Storage (optional, uncomment to enable) ──
+# storage:
+#   enabled: true
+#   path: "/var/lib/tc_limit/metrics.db"
+#   commit_interval: 60      # seconds — aggregation write interval
+#   retention_days: 90

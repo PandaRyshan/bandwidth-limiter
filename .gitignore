@@ -1,1 +1,5 @@
 .codewahel
+
+.venv/
+*.egg-info/
+*.cache/
