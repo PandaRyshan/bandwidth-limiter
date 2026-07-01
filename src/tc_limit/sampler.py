@@ -104,6 +104,18 @@ def read_counters(iface: str) -> int:
     return tx + rx
 
 
+def read_counters_split(iface: str) -> tuple[int, int]:
+    """Read tx_bytes and rx_bytes separately from /sys counters.
+
+    Returns:
+        (tx_bytes, rx_bytes) tuple.
+    """
+    base = SYS_NET / iface / "statistics"
+    tx = int((base / "tx_bytes").read_text().strip())
+    rx = int((base / "rx_bytes").read_text().strip())
+    return tx, rx
+
+
 def detect_interface() -> str:
     """Auto-detect the default network interface via `ip route`.
 

@@ -32,6 +32,12 @@ DEFAULTS: Dict[str, Any] = {
         "state_file": "/run/tc-limit/state.json",
         "pid_file": "/run/tc-limit/daemon.pid",
     },
+    "storage": {
+        "enabled": False,
+        "path": "/var/lib/tc-limit/metrics.db",
+        "commit_interval": 60,
+        "retention_days": 90,
+    },
 }
 
 
@@ -81,12 +87,21 @@ class RuntimeConfig:
 
 
 @dataclass
+class StorageConfig:
+    enabled: bool = False
+    path: str = "/var/lib/tc-limit/metrics.db"
+    commit_interval: int = 60       # seconds between SQLite writes
+    retention_days: int = 90
+
+
+@dataclass
 class Config:
     limits: LimitsConfig = field(default_factory=LimitsConfig)
     window: WindowConfig = field(default_factory=WindowConfig)
     cooldown: int = 3  # minutes
     network: NetworkConfig = field(default_factory=NetworkConfig)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
+    storage: StorageConfig = field(default_factory=StorageConfig)
 
     # Derived (populated after validation)
     buf_size: int = 0
@@ -205,6 +220,13 @@ def _validate_and_derive(raw: Dict[str, Any], source: Optional[str]) -> Config:
     state_file = str(runtime_raw.get("state_file", "/run/tc-limit/state.json"))
     pid_file = str(runtime_raw.get("pid_file", "/run/tc-limit/daemon.pid"))
 
+    # Storage
+    storage_raw = raw.get("storage", {})
+    storage_enabled = bool(storage_raw.get("enabled", False))
+    storage_path = str(storage_raw.get("path", "/var/lib/tc-limit/metrics.db"))
+    storage_commit_interval = int(storage_raw.get("commit_interval", 60))
+    storage_retention = int(storage_raw.get("retention_days", 90))
+
     # Build
     cfg = Config(
         limits=LimitsConfig(higher=higher, lower=lower, threshold=threshold),
@@ -212,6 +234,9 @@ def _validate_and_derive(raw: Dict[str, Any], source: Optional[str]) -> Config:
         cooldown=cooldown,
         network=NetworkConfig(interface=iface, burst_kbit=burst_kbit),
         runtime=RuntimeConfig(dry_run=dry_run, log_level=log_level, state_file=state_file, pid_file=pid_file),
+        storage=StorageConfig(enabled=storage_enabled, path=storage_path,
+                              commit_interval=storage_commit_interval,
+                              retention_days=storage_retention),
         _source_path=source,
     )
 

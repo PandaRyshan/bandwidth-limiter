@@ -14,7 +14,8 @@ from typing import Optional
 
 from tc_limit.config import Config, reload_config
 from tc_limit.executor import tc_change_rate, tc_cleanup, tc_init, tc_show
-from tc_limit.sampler import RingBuffer, detect_interface, read_counters
+from tc_limit.sampler import RingBuffer, detect_interface, read_counters, read_counters_split
+from tc_limit.storage import Storage
 
 logger = logging.getLogger(__name__)
 
@@ -193,7 +194,7 @@ class Daemon:
         self._reload_requested: bool = False
 
         # Storage (Phase 2)
-        self._storage: Optional[object] = None
+        self._storage: Optional[Storage] = None
 
     # ── Public API ────────────────────────────────────────────────────────
 
@@ -223,6 +224,15 @@ class Daemon:
             self.cfg.window.interval, self.cfg.cooldown,
         )
         logger.info("Interface: %s", self.iface)
+
+        # Storage (Phase 2)
+        if self.cfg.storage.enabled:
+            try:
+                self._storage = Storage(self.cfg.storage.path, self.cfg.storage.retention_days)
+                self._storage.open()
+            except Exception as exc:
+                logger.warning("Storage init failed, continuing without: %s", exc)
+                self._storage = None
 
         # Init tc
         rate = self._current_rate_mbps()
@@ -287,8 +297,21 @@ class Daemon:
                 self.sample_count, delta, self.buffer.filled, self.buffer.size,
             )
 
-            # ── State machine ──
+            # ── Storage (Phase 2) ──
             now = time.time()
+            if self._storage is not None:
+                try:
+                    tx, rx = read_counters_split(self.iface)
+                    rate_mbps = delta / (interval * 125_000)
+                    self._storage.insert_sample(
+                        now, tx, rx, delta, rate_mbps,
+                        self.state, self._current_rate_mbps(), self.iface,
+                    )
+                    self._storage.maybe_flush(now, self.cfg.storage.commit_interval)
+                except Exception as exc:
+                    logger.debug("Storage write failed: %s", exc)
+
+            # ── State machine ──
             self._evaluate_state_machine(now)
 
             # ── Periodic summary ──
@@ -302,6 +325,13 @@ class Daemon:
                     self.buffer.filled, self.buffer.size,
                 )
                 last_summary_time = now
+
+                # Daily aggregation (Phase 2)
+                if self._storage is not None:
+                    try:
+                        self._storage.maybe_aggregate_daily(now)
+                    except Exception as exc:
+                        logger.debug("Daily aggregation failed: %s", exc)
 
         # ── Cleanup ───────────────────────────────────────────────────────
         self._shutdown_handler()
@@ -331,6 +361,9 @@ class Daemon:
                     "→ LIMITED (window avg %.1fMbps > %dM threshold, cooldown %ds)",
                     avg, self.cfg.limits.threshold, self.cfg.cooldown_seconds,
                 )
+                if self._storage is not None:
+                    reason = f"window_avg {avg:.1f}Mbps > threshold {self.cfg.limits.threshold}Mbps"
+                    self._storage.insert_state_change(now, STATE_NORMAL, STATE_LIMITED, reason, avg)
 
         elif self.state == STATE_LIMITED:
             assert self.cooldown_start is not None
@@ -344,6 +377,11 @@ class Daemon:
                 self._save_state()
                 logger.info("→ NORMAL (cooldown complete, rate restored to %dM)",
                             self.cfg.limits.higher)
+                if self._storage is not None:
+                    self._storage.insert_state_change(
+                        now, STATE_LIMITED, STATE_NORMAL,
+                        f"cooldown {self.cfg.cooldown_seconds}s expired",
+                    )
 
     # ── Persistence ───────────────────────────────────────────────────────
 
@@ -407,6 +445,8 @@ class Daemon:
 
     def _shutdown_handler(self) -> None:
         """Graceful shutdown: cleanup tc, release lock, remove state."""
+        if self._storage is not None:
+            self._storage.close()
         tc_cleanup(self.iface)
         if self._lock_fd is not None:
             release_lock(self._lock_fd, self.cfg.runtime.pid_file)

@@ -26,9 +26,9 @@ runtime:
   state_file: "/run/tc-limit/state.json"
   pid_file:   "/run/tc-limit/daemon.pid"
 
-# ── Phase 2: Storage (optional, uncomment to enable) ──
-# storage:
-#   enabled: true
-#   path: "/var/lib/tc-limit/metrics.db"
-#   commit_interval: 60      # seconds — aggregation write interval
-#   retention_days: 90
+# ── Phase 2: Storage ──
+storage:
+  enabled: false                   # set to true to enable data collection
+  path: "/var/lib/tc-limit/metrics.db"
+  commit_interval: 60              # seconds — how often to flush to disk
+  retention_days: 90               # auto-delete samples older than this
