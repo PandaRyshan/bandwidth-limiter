@@ -42,6 +42,7 @@ Wants=network-online.target
 
 [Service]
 Type=notify
+RuntimeDirectory=tc-limit
 ExecStart=/usr/local/bin/tc-limit daemon --config /etc/tc-limit/config.yaml
 ExecReload=/bin/kill -HUP $MAINPID
 ExecStop=/usr/local/bin/tc-limit stop --config /etc/tc-limit/config.yaml

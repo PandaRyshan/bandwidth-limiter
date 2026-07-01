@@ -57,7 +57,12 @@ def acquire_lock(pid_file: str) -> int:
     Raises:
         SystemExit: Another instance is already running.
     """
-    Path(pid_file).parent.mkdir(parents=True, exist_ok=True)
+    try:
+        Path(pid_file).parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        # Under ProtectSystem=strict /run may be read-only;
+        # systemd's RuntimeDirectory= handles directory creation.
+        pass
     fd = os.open(pid_file, os.O_CREAT | os.O_RDWR, 0o644)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
