@@ -43,6 +43,7 @@ Wants=network-online.target
 [Service]
 Type=notify
 RuntimeDirectory=tc-limit
+StateDirectory=tc-limit
 ExecStart=/usr/local/bin/tc-limit daemon --config /etc/tc-limit/config.yaml
 ExecReload=/bin/kill -HUP $MAINPID
 ExecStop=/usr/local/bin/tc-limit stop --config /etc/tc-limit/config.yaml
@@ -51,7 +52,7 @@ RestartSec=5
 
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/run/tc-limit /etc/tc-limit
+ReadWritePaths=/run/tc-limit /etc/tc-limit /var/lib/tc-limit
 NoNewPrivileges=true
 
 StandardOutput=journal
@@ -94,8 +95,9 @@ do_install() {
         log "  ${CONFIG_FILE} already exists — skipped"
     fi
 
-    # 5. Runtime directory
+    # 5. Runtime / state directories
     mkdir -p "${STATE_DIR}"
+    mkdir -p "/var/lib/${APP_NAME}"
 
     # 6. Symlink
     log "Creating symlink ${BIN_LINK} → ${VENV_DIR}/bin/${APP_NAME}"

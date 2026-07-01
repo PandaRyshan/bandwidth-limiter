@@ -204,7 +204,20 @@ def cmd_report(args: argparse.Namespace) -> None:
     # Check DB exists
     import os as _os
     if not _os.path.exists(db_path):
-        print(f"No data yet — database not found at {db_path}", file=sys.stderr)
+        if not cfg.storage.enabled:
+            print(
+                f"Storage is disabled in config — set 'storage.enabled: true' in\n"
+                f"{cfg._source_path or '/etc/tc-limit/config.yaml'} and restart the daemon:\n"
+                f"  sudo systemctl restart tc-limit",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"No data collected yet.  The database will be created at\n"
+                f"{db_path} once the daemon runs with storage enabled.\n"
+                f"Check 'systemctl status tc-limit' to verify the daemon is running.",
+                file=sys.stderr,
+            )
         sys.exit(1)
 
     sub = args.report_subcommand
