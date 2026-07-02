@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import calendar
 import logging
 import sqlite3
 import time
@@ -186,7 +187,7 @@ class Storage:
         # Aggregate today's samples
         # Compute start-of-day as Unix timestamp (UTC)
         tm = time.gmtime(now)
-        today_start = time.mktime((tm.tm_year, tm.tm_mon, tm.tm_mday, 0, 0, 0, 0, 0, 0))
+        today_start = calendar.timegm((tm.tm_year, tm.tm_mon, tm.tm_mday, 0, 0, 0, 0, 0, 0))
         agg = self._conn.execute("""
             SELECT
                 COUNT(*) AS sample_count,

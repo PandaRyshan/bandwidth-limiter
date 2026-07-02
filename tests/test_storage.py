@@ -118,17 +118,19 @@ class TestRetention:
 
 class TestDailyAggregation:
     def test_maybe_aggregate_daily(self, storage):
-        now = time.time()
-        date_str = time.strftime("%Y-%m-%d", time.gmtime(now))
-        # Insert some samples
+        import calendar
+        # Use a fixed noon timestamp to avoid midnight boundary issues
+        noon = calendar.timegm((2026, 7, 1, 12, 0, 0, 0, 0, 0))
+        date_str = "2026-07-01"
+        # Insert some samples across the day
         for i in range(10):
             storage._conn.execute(
                 "INSERT INTO samples (ts, tx_bytes, rx_bytes, delta_bytes, rate_mbps, state, limit_mbps, iface) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (now - i * 60, 1000, 2000, 50000000, 40.0, "NORMAL", 150, "eth0"),
+                (noon - i * 3600, 1000, 2000, 50000000, 40.0, "NORMAL", 150, "eth0"),
             )
         storage._conn.commit()
-        storage.maybe_aggregate_daily(now)
+        storage.maybe_aggregate_daily(noon)
         row = storage._conn.execute(
             "SELECT * FROM daily_summary WHERE date = ?", (date_str,)
         ).fetchone()

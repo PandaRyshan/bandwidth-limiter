@@ -309,7 +309,7 @@ class Daemon:
                     )
                     self._storage.maybe_flush(now, self.cfg.storage.commit_interval)
                 except Exception as exc:
-                    logger.debug("Storage write failed: %s", exc)
+                    logger.warning("Storage write failed (will retry): %s", exc)
 
             # ── State machine ──
             self._evaluate_state_machine(now)
@@ -331,7 +331,7 @@ class Daemon:
                     try:
                         self._storage.maybe_aggregate_daily(now)
                     except Exception as exc:
-                        logger.debug("Daily aggregation failed: %s", exc)
+                        logger.warning("Daily aggregation failed: %s", exc)
 
         # ── Cleanup ───────────────────────────────────────────────────────
         self._shutdown_handler()
