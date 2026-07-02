@@ -234,8 +234,15 @@ def cmd_report(args: argparse.Namespace) -> None:
             print(f"{r['date']:<12} {r['total_gb']:>10.2f} {r['avg_mbps']:>10.1f} {r['peak_mbps']:>10.1f}")
 
     elif sub == "bandwidth":
-        since = getattr(args, "since", None)
+        since_raw = getattr(args, "since", None)
         limit = getattr(args, "limit", 500)
+        since = None
+        if since_raw:
+            try:
+                since = time.mktime(time.strptime(since_raw, "%Y-%m-%d"))
+            except ValueError:
+                print(f"Invalid date format: {since_raw} (use YYYY-MM-DD)", file=sys.stderr)
+                sys.exit(1)
         rows = query_bandwidth_timeline(db_path, since=since, limit=limit)
         if not rows:
             print("No bandwidth samples yet.")
@@ -243,7 +250,7 @@ def cmd_report(args: argparse.Namespace) -> None:
         print(f"{'Timestamp':<22} {'Rate Mbps':>10} {'State':>10} {'Limit':>8}")
         print("-" * 54)
         for r in rows:
-            ts_str = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(r["ts"])) if r["ts"] else "-"
+            ts_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r["ts"])) if r["ts"] else "-"
             print(f"{ts_str:<22} {r['rate_mbps']:>10.1f} {r['state']:>10} {r['limit_mbps']:>8}")
 
     elif sub == "events":
@@ -255,7 +262,7 @@ def cmd_report(args: argparse.Namespace) -> None:
         print(f"{'Timestamp':<22} {'From':>10} {'To':>10} {'Reason':>50}")
         print("-" * 96)
         for r in rows:
-            ts_str = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(r["ts"])) if r["ts"] else "-"
+            ts_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r["ts"])) if r["ts"] else "-"
             reason = (r["reason"] or "")[:48]
             print(f"{ts_str:<22} {r['from_state']:>10} {r['to_state']:>10} {reason:<50}")
 
@@ -268,7 +275,7 @@ def cmd_report(args: argparse.Namespace) -> None:
         print(f"Total transfer:      {data['total_transfer_gb']} GB")
         print(f"Last rate:           {data['last_rate_mbps']} Mbps ({data['last_state']})")
         if data["last_sample_ts"]:
-            ts_str = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(data["last_sample_ts"]))
+            ts_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(data["last_sample_ts"]))
             print(f"Last sample:         {ts_str}")
         print(f"Limited time (tot):  {data['total_limited_minutes']} min")
         print(f"State changes:       {data['total_state_changes']}")
