@@ -82,9 +82,13 @@ class TestLoadConfig:
         assert cfg.limits.higher == 150
         assert cfg.limits.lower == 110
         assert cfg.limits.threshold == 120
-        assert cfg.window.duration == 5
-        assert cfg.window.interval == 10
-        assert cfg.cooldown == 3
+        assert cfg.window.duration == 300
+        assert cfg.window.interval == 5
+        assert cfg.cooldown == 180
+        assert cfg.recovery_steps == 1
+        assert cfg.burst.enabled is False
+        assert cfg.burst.window == 180
+        assert cfg.burst.threshold_mb == 1024
         assert cfg.network.interface == ""
         assert cfg.network.burst_kbit == 16
         assert cfg.runtime.dry_run is False
@@ -94,12 +98,13 @@ class TestLoadConfig:
         yaml_path = tmp_path / "defaults.yaml"
         yaml_path.write_text("{}")
         cfg = load_config(config_path=str(yaml_path))
-        # duration=5min, interval=10s → buf_size = 5*60/10 = 30
-        assert cfg.buf_size == 30
+        # duration=300s, interval=5s → buf_size = 300/5 = 60
+        assert cfg.buf_size == 60
         # threshold=120Mbps → 120 * 125000 = 15_000_000 bps
         assert cfg.threshold_bps == 15_000_000
-        assert cfg.window_seconds == 300
-        assert cfg.cooldown_seconds == 180
+        # burst defaults
+        assert cfg.burst_buf_size == 36  # 180/5
+        assert cfg.burst_threshold_bytes == 1024 * 1_000_000
 
     def test_from_yaml_file(self, tmp_path):
         yaml_path = tmp_path / "test.yaml"
@@ -121,8 +126,7 @@ class TestLoadConfig:
         assert cfg.network.burst_kbit == 32
         assert cfg.runtime.dry_run is True
         assert cfg.runtime.log_level == LogLevel.DEBUG
-        assert cfg.buf_size == 10 * 60 // 5  # 120
-        assert cfg.cooldown_seconds == 300
+        assert cfg.buf_size == 10 // 5  # 2
 
     def test_cli_overrides(self, tmp_path):
         yaml_path = tmp_path / "test.yaml"
@@ -165,21 +169,21 @@ class TestReloadConfig:
     def test_reload_preserves_window_on_change(self, tmp_path):
         yaml_path = tmp_path / "test.yaml"
         yaml_path.write_text(yaml.dump({
-            "window": {"duration": 5, "interval": 10},
+            "window": {"duration": 500, "interval": 10},
         }))
         cfg = load_config(config_path=str(yaml_path))
-        assert cfg.buf_size == 30
+        assert cfg.buf_size == 50
 
         # Change window duration in file
         yaml_path.write_text(yaml.dump({
             "limits": {"higher": 200, "lower": 100, "threshold": 150},
-            "window": {"duration": 10, "interval": 5},
+            "window": {"duration": 100, "interval": 5},
         }))
         new = reload_config(cfg, config_path=str(yaml_path))
         # Window should NOT have changed (non-hot-reloadable)
-        assert new.window.duration == 5
+        assert new.window.duration == 500
         assert new.window.interval == 10
-        assert new.buf_size == 30
+        assert new.buf_size == 50
         # Hot-reloadable params SHOULD have changed
         assert new.limits.higher == 200
 
@@ -187,17 +191,16 @@ class TestReloadConfig:
         yaml_path = tmp_path / "test.yaml"
         yaml_path.write_text(yaml.dump({
             "limits": {"higher": 150, "lower": 110, "threshold": 120},
-            "cooldown": 3,
+            "cooldown": 180,
         }))
         cfg = load_config(config_path=str(yaml_path))
 
         yaml_path.write_text(yaml.dump({
             "limits": {"higher": 180, "lower": 130, "threshold": 140},
-            "cooldown": 7,
+            "cooldown": 420,
         }))
         new = reload_config(cfg, config_path=str(yaml_path))
         assert new.limits.higher == 180
         assert new.limits.threshold == 140
-        assert new.cooldown == 7
-        assert new.cooldown_seconds == 420
+        assert new.cooldown == 420
         assert new.threshold_bps == 140 * MBIT_TO_BPS

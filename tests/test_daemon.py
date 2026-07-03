@@ -32,10 +32,10 @@ def _make_config(**overrides) -> Config:
             target = getattr(target, part)
         setattr(target, parts[-1], val)
     # Recompute derived
-    cfg.buf_size = cfg.window.duration * 60 // cfg.window.interval
+    cfg.buf_size = cfg.window.duration // cfg.window.interval
     cfg.threshold_bps = cfg.limits.threshold * 125_000
-    cfg.window_seconds = cfg.window.duration * 60
-    cfg.cooldown_seconds = cfg.cooldown * 60
+    cfg.burst_buf_size = cfg.burst.window // cfg.window.interval
+    cfg.burst_threshold_bytes = cfg.burst.threshold_mb * 1_000_000
     return cfg
 
 
@@ -107,7 +107,7 @@ class TestDaemonStateMachine:
     """Test the state machine logic in isolation (mock subprocess + /sys)."""
 
     def _make_daemon(self, tmp_path, buf_size=6, higher=150, lower=110, threshold=120,
-                     window_duration=1, interval=10, cooldown=3):
+                     window_duration=60, interval=10, cooldown=180):
         """Create a Daemon with mocked counters."""
         cfg = _make_config(
             **{
@@ -147,8 +147,7 @@ class TestDaemonStateMachine:
         # threshold_bytes = 100*125000*60 = 750,000,000
         # Each sample needs > 125,000,000 bytes
 
-        d = self._make_daemon(tmp_path, buf_size=6, threshold=100, higher=150, lower=80,
-                              window_duration=1, interval=10, cooldown=3)
+        d = self._make_daemon(tmp_path, buf_size=6, threshold=100, higher=150, lower=80)
 
         # Fill buffer with high values: each sample = 200 MB worth of bytes
         # 200 Mbps for 10s = 200 * 125000 * 10 = 250,000,000 bytes
@@ -163,18 +162,18 @@ class TestDaemonStateMachine:
 
     def test_limited_to_normal_after_cooldown(self, tmp_path):
         """After cooldown expires, transition back to NORMAL."""
-        d = self._make_daemon(tmp_path, buf_size=3, cooldown=3)
+        d = self._make_daemon(tmp_path, buf_size=3, cooldown=180)
         d.state = STATE_LIMITED
-        d.cooldown_start = time.time() - 200  # cooldown=3 min=180s, expired
+        d.cooldown_start = time.time() - 200  # 200s > 180s cooldown → expired
         d._evaluate_state_machine(time.time())
         assert d.state == STATE_NORMAL
         assert d.cooldown_start is None
 
     def test_limited_stays_during_cooldown(self, tmp_path):
         """During cooldown, stay in LIMITED."""
-        d = self._make_daemon(tmp_path, buf_size=3, cooldown=3)
+        d = self._make_daemon(tmp_path, buf_size=3, cooldown=180)
         d.state = STATE_LIMITED
-        d.cooldown_start = time.time() - 10  # only 10s ago
+        d.cooldown_start = time.time() - 10  # 10s < 180s cooldown
         d._evaluate_state_machine(time.time())
         assert d.state == STATE_LIMITED
 
@@ -189,8 +188,7 @@ class TestDaemonStateMachine:
 
     def test_normal_stays_when_below_threshold(self, tmp_path):
         """Full buffer but below threshold → stay NORMAL."""
-        d = self._make_daemon(tmp_path, buf_size=6, threshold=1000, higher=1500, lower=800,
-                              window_duration=1, interval=10, cooldown=3)
+        d = self._make_daemon(tmp_path, buf_size=6, threshold=1000, higher=1500, lower=800)
         # Fill with tiny samples
         for _ in range(6):
             d.buffer.push(1)

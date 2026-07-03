@@ -18,6 +18,7 @@ STATE_DIR="/run/${APP_NAME}"
 BIN_LINK="/usr/local/bin/${APP_NAME}"
 SERVICE_FILE="/etc/systemd/system/${APP_NAME}.service"
 NO_START=false
+TEMPLATE="default"
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -74,7 +75,7 @@ do_install() {
     mkdir -p "${SRC_DIR}"
     cp -r "${SCRIPT_DIR}/pyproject.toml" "${SRC_DIR}/"
     cp -r "${SCRIPT_DIR}/src" "${SRC_DIR}/"
-    # Also copy the config example (only used if config dir doesn't exist yet)
+    # Also copy the config example + templates (only used if config dir doesn't exist yet)
     cp -r "${SCRIPT_DIR}/config.example.yaml" "${SRC_DIR}/"
 
     # 2. Create venv
@@ -89,7 +90,15 @@ do_install() {
     log "Setting up config directory ${CONFIG_DIR}"
     if [[ ! -f "${CONFIG_FILE}" ]]; then
         mkdir -p "${CONFIG_DIR}"
-        cp "${SCRIPT_DIR}/config.example.yaml" "${CONFIG_FILE}"
+        if [[ "${TEMPLATE}" != "default" ]]; then
+            log "  Generating config from template: ${TEMPLATE}"
+            "${VENV_DIR}/bin/python3" -c "
+from tc_limit.templates import generate_yaml
+print(generate_yaml('${TEMPLATE}'), end='')
+" > "${CONFIG_FILE}"
+        else
+            cp "${SCRIPT_DIR}/config.example.yaml" "${CONFIG_FILE}"
+        fi
         log "  Created ${CONFIG_FILE} (edit to customize)"
     else
         log "  ${CONFIG_FILE} already exists — skipped"
@@ -195,9 +204,13 @@ main() {
     case "${1:-}" in
         install)
             require_root
-            if [[ "${2:-}" == "--no-start" ]]; then
-                NO_START=true
-            fi
+            while [[ $# -gt 1 ]]; do
+                case "$2" in
+                    --no-start) NO_START=true; shift ;;
+                    --template) TEMPLATE="$3"; shift 2 ;;
+                    *) shift ;;
+                esac
+            done
             do_install
             ;;
         uninstall)

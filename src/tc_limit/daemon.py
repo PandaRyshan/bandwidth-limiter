@@ -105,7 +105,7 @@ def save_state(
     rate_mbps: int,
     threshold_mbps: int,
     window_avg_mbps: float,
-    cooldown_seconds: int,
+    cooldown: int,
     cooldown_start: Optional[float],
     sample_count: int,
 ) -> None:
@@ -116,7 +116,7 @@ def save_state(
         "current_rate_mbps": rate_mbps,
         "threshold_mbps": threshold_mbps,
         "window_avg_mbps": round(window_avg_mbps, 1) if window_avg_mbps is not None else None,
-        "cooldown_seconds": cooldown_seconds,
+        "cooldown_seconds": cooldown,
         "cooldown_start": cooldown_start,
         "sample_count": sample_count,
         "updated_at": time.time(),
@@ -174,12 +174,16 @@ class Daemon:
         if not self.iface:
             raise RuntimeError("Cannot determine network interface")
 
-        # Ring buffer
+        # Ring buffers
         self.buffer = RingBuffer(config.buf_size)
+        self.burst_buffer: Optional[RingBuffer] = (
+            RingBuffer(config.burst_buf_size) if config.burst.enabled else None
+        )
 
         # State
         self.state: str = STATE_NORMAL
         self.cooldown_start: Optional[float] = None
+        self.recovery_step: int = 0    # 0 = at lower; recovery_steps = normal
         self.sample_count: int = 0
 
         # Counter tracking
@@ -218,7 +222,7 @@ class Daemon:
         # Log start
         logger.info(
             "Daemon started: higher=%dM lower=%dM threshold=%dM "
-            "window=%dm interval=%ds cooldown=%dm",
+            "window=%ds interval=%ds cooldown=%ds",
             self.cfg.limits.higher, self.cfg.limits.lower,
             self.cfg.limits.threshold, self.cfg.window.duration,
             self.cfg.window.interval, self.cfg.cooldown,
@@ -288,13 +292,17 @@ class Daemon:
                 self.prev_bytes = cur_bytes
                 continue
 
-            # ── Push to ring buffer ──
+            # ── Push to ring buffers ──
             self.buffer.push(delta)
+            if self.burst_buffer is not None:
+                self.burst_buffer.push(delta)
             self.sample_count += 1
 
             logger.debug(
-                "sample #%d: delta_bytes=%d window_filled=%d/%d",
+                "sample #%d: delta_bytes=%d bw_filled=%d/%d burst_filled=%s/%d",
                 self.sample_count, delta, self.buffer.filled, self.buffer.size,
+                self.burst_buffer.filled if self.burst_buffer else "-",
+                self.cfg.burst_buf_size if self.burst_buffer else 0,
             )
 
             # ── Storage (Phase 2) ──
@@ -337,51 +345,112 @@ class Daemon:
         self._shutdown_handler()
 
     def _current_rate_mbps(self) -> int:
-        """Return the tc rate for the current state."""
-        return (self.cfg.limits.lower if self.state == STATE_LIMITED
-                else self.cfg.limits.higher)
+        """Return the tc rate for the current state, accounting for recovery steps."""
+        if self.state != STATE_LIMITED:
+            return self.cfg.limits.higher
+        if self.cfg.recovery_steps <= 1 or self.recovery_step <= 0:
+            return self.cfg.limits.lower
+        step_size = (self.cfg.limits.higher - self.cfg.limits.lower) // self.cfg.recovery_steps
+        rate = self.cfg.limits.lower + self.recovery_step * step_size
+        return min(rate, self.cfg.limits.higher)
 
     # ── State machine ─────────────────────────────────────────────────────
 
     def _evaluate_state_machine(self, now: float) -> None:
-        """Evaluate state transitions based on window average and cooldown."""
+        """Evaluate state transitions: bandwidth avg, burst volume, recovery steps."""
         if self.state == STATE_NORMAL:
-            if not self.buffer.is_full():
+            trigger = self._check_bandwidth_trigger()
+            if not trigger:
+                trigger = self._check_burst_trigger()
+            if not trigger:
                 return
-            window_sum = self.buffer.sum()
-            threshold_bytes = self.cfg.threshold_bps * self.cfg.window_seconds
-            if window_sum > threshold_bytes:
-                self.state = STATE_LIMITED
-                self.cooldown_start = now
-                tc_change_rate(self.iface, self.cfg.limits.lower,
-                               self.cfg.network.burst_kbit, self.cfg.runtime.dry_run)
-                avg = self.buffer.average_mbps(self.cfg.window.interval)
-                self._save_state()
-                logger.info(
-                    "→ LIMITED (window avg %.1fMbps > %dM threshold, cooldown %ds)",
-                    avg, self.cfg.limits.threshold, self.cfg.cooldown_seconds,
-                )
-                if self._storage is not None:
-                    reason = f"window_avg {avg:.1f}Mbps > threshold {self.cfg.limits.threshold}Mbps"
-                    self._storage.insert_state_change(now, STATE_NORMAL, STATE_LIMITED, reason, avg)
+            reason, avg = trigger
+            self.state = STATE_LIMITED
+            self.cooldown_start = now
+            self.recovery_step = 0
+            tc_change_rate(self.iface, self.cfg.limits.lower,
+                           self.cfg.network.burst_kbit, self.cfg.runtime.dry_run)
+            self._save_state()
+            logger.info("→ LIMITED (%s, cooldown %ds)", reason, self.cfg.cooldown)
+            if self._storage is not None:
+                self._storage.insert_state_change(now, STATE_NORMAL, STATE_LIMITED, reason, avg)
 
         elif self.state == STATE_LIMITED:
             assert self.cooldown_start is not None
+            steps = self.cfg.recovery_steps
+            step_cooldown = self.cfg.cooldown / max(steps, 1)
             elapsed = now - self.cooldown_start
-            if elapsed >= self.cfg.cooldown_seconds:
-                self.state = STATE_NORMAL
-                self.cooldown_start = None
-                self.buffer.clear()
-                tc_change_rate(self.iface, self.cfg.limits.higher,
-                               self.cfg.network.burst_kbit, self.cfg.runtime.dry_run)
-                self._save_state()
-                logger.info("→ NORMAL (cooldown complete, rate restored to %dM)",
-                            self.cfg.limits.higher)
-                if self._storage is not None:
-                    self._storage.insert_state_change(
-                        now, STATE_LIMITED, STATE_NORMAL,
-                        f"cooldown {self.cfg.cooldown_seconds}s expired",
-                    )
+
+            # Check if any trigger fires during recovery → reset to step 0
+            if self.recovery_step > 0:
+                trigger = self._check_bandwidth_trigger()
+                if not trigger:
+                    trigger = self._check_burst_trigger()
+                if trigger:
+                    self.recovery_step = 0
+                    self.cooldown_start = now
+                    tc_change_rate(self.iface, self.cfg.limits.lower,
+                                   self.cfg.network.burst_kbit, self.cfg.runtime.dry_run)
+                    self._save_state()
+                    logger.info("→ RELIMITED (re-triggered during recovery, back to lower)")
+                    return
+
+            # Recovery step logic
+            if steps <= 1:
+                if elapsed >= self.cfg.cooldown:
+                    self._enter_normal(now)
+                    return
+            else:
+                next_step = min(int(elapsed / step_cooldown), steps)
+                if next_step > self.recovery_step:
+                    self.recovery_step = next_step
+                    new_rate = self._current_rate_mbps()
+                    tc_change_rate(self.iface, new_rate,
+                                   self.cfg.network.burst_kbit, self.cfg.runtime.dry_run)
+                    self._save_state()
+                    if next_step >= steps:
+                        self._enter_normal(now)
+                    else:
+                        logger.info("→ RECOVERY step %d/%d (rate %dM)", next_step, steps, new_rate)
+
+    def _check_bandwidth_trigger(self):
+        """Return (reason, avg_mbps) if bandwidth trigger fires, else None."""
+        if not self.buffer.is_full():
+            return None
+        window_sum = self.buffer.sum()
+        threshold_bytes = self.cfg.threshold_bps * self.cfg.window.duration
+        if window_sum > threshold_bytes:
+            avg = self.buffer.average_mbps(self.cfg.window.interval)
+            return (f"window_avg {avg:.1f}Mbps > threshold {self.cfg.limits.threshold}Mbps", avg)
+        return None
+
+    def _check_burst_trigger(self):
+        """Return (reason, None) if burst trigger fires, else None."""
+        if self.burst_buffer is None or not self.burst_buffer.is_full():
+            return None
+        burst_bytes = self.burst_buffer.sum()
+        if burst_bytes > self.cfg.burst_threshold_bytes:
+            burst_mb = burst_bytes / 1_000_000
+            return (f"burst {burst_mb:.0f}MB > threshold {self.cfg.burst.threshold_mb}MB", None)
+        return None
+
+    def _enter_normal(self, now: float) -> None:
+        """Transition from LIMITED to NORMAL."""
+        self.state = STATE_NORMAL
+        self.cooldown_start = None
+        self.recovery_step = 0
+        self.buffer.clear()
+        if self.burst_buffer is not None:
+            self.burst_buffer.clear()
+        tc_change_rate(self.iface, self.cfg.limits.higher,
+                       self.cfg.network.burst_kbit, self.cfg.runtime.dry_run)
+        self._save_state()
+        logger.info("→ NORMAL (rate restored to %dM)", self.cfg.limits.higher)
+        if self._storage is not None:
+            self._storage.insert_state_change(
+                now, STATE_LIMITED, STATE_NORMAL,
+                f"cooldown {self.cfg.cooldown}s expired",
+            )
 
     # ── Persistence ───────────────────────────────────────────────────────
 
@@ -393,7 +462,7 @@ class Daemon:
             rate_mbps=self._current_rate_mbps(),
             threshold_mbps=self.cfg.limits.threshold,
             window_avg_mbps=self.buffer.average_mbps(self.cfg.window.interval),
-            cooldown_seconds=self.cfg.cooldown_seconds,
+            cooldown=self.cfg.cooldown,
             cooldown_start=self.cooldown_start,
             sample_count=self.sample_count,
         )
@@ -419,7 +488,7 @@ class Daemon:
             f"samples={self.sample_count}"
         )
         if self.state == STATE_LIMITED and self.cooldown_start is not None:
-            remain = max(0, self.cfg.cooldown_seconds - (time.time() - self.cooldown_start))
+            remain = max(0, self.cfg.cooldown - (time.time() - self.cooldown_start))
             line += f" cooldown={remain:.0f}s"
         if self.buffer.filled > 0:
             line += f" window_avg={avg:.1f}Mbps"

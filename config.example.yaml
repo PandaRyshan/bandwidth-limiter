@@ -1,34 +1,44 @@
 # tc-limit — Smart Bandwidth Limit Daemon
 # Copy to /etc/tc-limit/config.yaml and edit to suit your environment.
+#
+# All time values in seconds, traffic in MB, bandwidth in Mbps.
+# Values may be bare integers or expressions like "5 * 60".
 
 # ── Bandwidth Limits ──
 limits:
-  higher:    150       # Mbps — normal operating rate
-  lower:     110       # Mbps — limited rate
-  threshold: 120       # Mbps — alert line
+  higher:    150           # Mbps — normal operating rate
+  lower:     110           # Mbps — limited rate
+  threshold: 120           # Mbps — alert line
 
 # ── Sampling Window ──
 window:
-  duration:  5         # minutes — sliding window size
-  interval:  10        # seconds — sampling interval
+  duration:  300           # seconds (5 * 60)
+  interval:  5             # seconds
 
-cooldown:    3         # minutes — cooldown after entering LIMITED
+# ── Burst Detection ──
+burst:
+  enabled:      false
+  window:       180        # seconds (3 * 60)
+  threshold_mb: 1024       # MB — trigger if this much data passes in window
+
+cooldown:       180        # seconds (3 * 60)
+recovery_steps: 1          # 1 = instant recovery; 2+ = ramp in steps
 
 # ── Network ──
 network:
-  interface: ""        # empty = auto-detect default route interface
-  burst_kbit: 16       # kbit — tc HTB token bucket burst
+  interface: ""            # empty = auto-detect default route interface
+  burst_kbit: 16           # kbit — tc HTB token bucket burst
 
 # ── Runtime ──
 runtime:
   dry_run:   false
-  log_level: "INFO"    # DEBUG | INFO | WARN | ERROR
+  log_level: "INFO"        # DEBUG | INFO | WARN | ERROR
   state_file: "/run/tc-limit/state.json"
   pid_file:   "/run/tc-limit/daemon.pid"
 
-# ── Phase 2: Storage ──
+# ── Storage ──
 storage:
-  enabled: false                   # set to true to enable data collection
+  enabled: false
   path: "/var/lib/tc-limit/metrics.db"
-  commit_interval: 60              # seconds — how often to flush to disk
-  retention_days: 90               # auto-delete samples older than this
+  commit_interval: 60
+  retention_days: 90
